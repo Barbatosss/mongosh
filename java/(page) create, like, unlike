@@ -1,0 +1,153 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
+import com.mongodb.client.result.InsertOneResult;
+import org.bson.Document;
+
+import java.util.Date;
+
+public class PageService {
+
+    private final MongoDatabase db;
+
+    public PageService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    // Create a new page
+    public void createPage(int creatorUserID, String pageName, String description) {
+        MongoCollection<Document> pageCollection = db.getCollection("page");
+
+        try {
+            // Get the highest pageID
+            Document highestPageID = pageCollection.find()
+                    .sort(new Document("PageID", -1))
+                    .limit(1)
+                    .first();
+
+            int newPageID = highestPageID != null ? highestPageID.getInteger("PageID") + 1 : 1;
+
+            // Create the page document
+            Document page = new Document("PageID", newPageID)
+                    .append("CreatorUserID", creatorUserID)
+                    .append("PageName", pageName)
+                    .append("Description", description)
+                    .append("CreationDate", new Date())
+                    .append("Likes", 0); // initial likes is 0
+
+            // Insert the page document into the collection
+            InsertOneResult result = pageCollection.insertOne(page);
+
+            if (result.wasAcknowledged()) {
+                System.out.println("Page created successfully with PageID: " + newPageID);
+            } else {
+                System.out.println("Failed to insert page.");
+            }
+        } catch (Exception e) {
+            System.out.println("Error creating page: " + e.getMessage());
+        }
+    }
+
+    // Function to like a page
+    public void likePage(int userID, int pageID) {
+        MongoCollection<Document> pageCollection = db.getCollection("page");
+        MongoCollection<Document> pageLikesCollection = db.getCollection("pageLikes");
+        MongoCollection<Document> notificationCollection = db.getCollection("notification");
+
+        try {
+            // Find the page document by its ID
+            Document page = pageCollection.find(new Document("PageID", pageID)).first();
+
+            if (page == null) {
+                System.out.println("Error: Page not found.");
+                return;
+            }
+
+            // Check if the user has already liked the page
+            Document existingLike = pageLikesCollection.find(new Document("UserID", userID).append("PageID", pageID)).first();
+
+            if (existingLike != null) {
+                System.out.println("Error: User has already liked this page.");
+                return;
+            }
+
+            // Increment the Likes count
+            int updatedLikes = page.getInteger("Likes") + 1;
+
+            // Update the page document with the incremented Likes count
+            pageCollection.updateOne(new Document("PageID", pageID), new Document("$set", new Document("Likes", updatedLikes)));
+
+            // Insert the like record
+            Document like = new Document("UserID", userID)
+                    .append("PageID", pageID)
+                    .append("Timestamp", new Date());
+            pageLikesCollection.insertOne(like);
+
+            // Create a notification
+            Document notification = new Document("UserID", page.getInteger("CreatorUserID"))
+                    .append("SenderID", userID)
+                    .append("Status", "Unread")
+                    .append("NotificationType", "Page Like")
+                    .append("Timestamp", new Date());
+            notificationCollection.insertOne(notification);
+
+            System.out.println("Page liked successfully by UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error liking page: " + e.getMessage());
+        }
+    }
+
+    // Function to delete a page like
+    public void deletePageLike(int userID, int pageID) {
+        MongoCollection<Document> pageCollection = db.getCollection("page");
+        MongoCollection<Document> pageLikesCollection = db.getCollection("pageLikes");
+
+        try {
+            // Find the like record
+            Document like = pageLikesCollection.find(new Document("UserID", userID).append("PageID", pageID)).first();
+
+            if (like == null) {
+                System.out.println("Error: Like not found.");
+                return;
+            }
+
+            // Delete the like record
+            pageLikesCollection.deleteOne(new Document("UserID", userID).append("PageID", pageID));
+
+            // Find the page document by its ID
+            Document page = pageCollection.find(new Document("PageID", pageID)).first();
+
+            if (page == null) {
+                System.out.println("Error: Page not found.");
+                return;
+            }
+
+            // Decrement the Likes count
+            int updatedLikes = page.getInteger("Likes") - 1;
+
+            // Update the page document with the decremented Likes count
+            pageCollection.updateOne(new Document("PageID", pageID), new Document("$set", new Document("Likes", updatedLikes)));
+
+            System.out.println("Like deleted successfully by UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error deleting like: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of PageService
+        PageService pageService = new PageService(database);
+
+        // Usage example
+        pageService.createPage(1, "My Page", "This is the description of my page.");
+        pageService.likePage(1, 1); // UserID 1 likes PageID 1
+        pageService.deletePageLike(1, 1); // Delete like for UserID 1 and PageID 1
+    }
+}
