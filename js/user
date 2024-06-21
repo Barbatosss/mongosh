@@ -1,0 +1,274 @@
+
+// create a user
+function createUser(fullName, email, password, dateOfBirth, gender, location, relationshipStatus, bio) {
+    // Find the highest UserID
+    const highestUser = db.user.findOne({}, { UserID: 1 }, { sort: { UserID: -1 } });
+
+    // Increment the UserID
+    const newUserID = highestUser ? highestUser.UserID + 1 : 1;
+
+    // Create the user object
+    const user = {
+        UserID: newUserID,
+        FullName: fullName,
+        Email: email,
+        Password: password,
+        DateOfBirth: new Date(dateOfBirth),
+        Gender: gender,
+        Location: location,
+        RelationshipStatus: relationshipStatus,
+        Bio: bio,
+        AccountCreationTimestamp: new Date()
+    };
+
+    try {
+        // Insert the user into the user collection
+        const insertResult = db.user.insertOne(user);
+
+        if (insertResult.insertedCount === 0) {
+            throw new Error("Failed to insert user.");
+        }
+
+        // Calculate age and update the user document
+        db.user.aggregate([
+            {
+                $addFields: {
+                    Age: {
+                        $floor: {
+                            $divide: [
+                                { $subtract: [new Date(), "$DateOfBirth"] },
+                                1000 * 60 * 60 * 24 * 365.25
+                            ]
+                        }
+                    }
+                }
+            }
+        ]).forEach(doc => {
+            db.user.updateOne(
+                { _id: doc._id },
+                { $set: { Age: doc.Age } }
+            );
+        });
+
+        print("User created successfully with UserID: " + newUserID);
+    } catch (e) {
+        print("Error creating user: " + e);
+    }
+}
+
+// Sample usage
+createUser(
+    "Sabine Callas",
+    "viper@example.com",
+    "toxic123",
+    "1986-08-03",
+    "Female",
+    "United States",
+    "Single",
+    "A scientist focused on toxicology"
+);
+
+// create user post
+function createUserPost(userID, content, privacySetting, categoryName) {
+    try {
+        // Check if the category exists
+        let category = db.category.findOne({ CategoryName: { $regex: new RegExp('^' + categoryName + '$', 'i') } });
+
+        // If the category does not exist, create it
+        if (!category) {
+            // Generate a new CategoryID
+            const highestCategory = db.category.findOne({}, { CategoryID: 1 }, { sort: { CategoryID: -1 } });
+            const newCategoryID = highestCategory ? highestCategory.CategoryID + 1 : 1;
+
+            // Create the category object
+            category = {
+                CategoryID: newCategoryID,
+                CategoryName: categoryName,
+                CreationDate: new Date()
+            };
+
+            // Insert the category into the database
+            const categoryResult = db.category.insertOne(category);
+
+            if (categoryResult.insertedCount === 0) {
+                throw new Error("Failed to insert category.");
+            }
+
+            print("Category added successfully with CategoryID: " + newCategoryID);
+        }
+
+        // Find the highest PostID
+        const highestPost = db.post.findOne({}, { PostID: 1 }, { sort: { PostID: -1 } });
+
+        // Increment the PostID
+        const newPostID = highestPost ? highestPost.PostID + 1 : 1;
+
+        // Create the post object
+        const post = {
+            PostID: newPostID,
+            AuthorType: "User",
+            AuthorID: userID,
+            Content: content,
+            PrivacySetting: privacySetting,
+            CategoryID: category.CategoryID,
+            Timestamp: new Date(),
+            Likes: 0 // Initial likes is 0
+        };
+
+        // Insert the post into the posts collection
+        const postResult = db.post.insertOne(post);
+
+        if (postResult.insertedCount === 0) {
+            throw new Error("Failed to insert post.");
+        }
+
+        print("Post created successfully with PostID: " + newPostID);
+    } catch (e) {
+        print("Error creating post: " + e);
+    }
+}
+
+// Sample usage
+createUserPost(1, "This is a user's post.", "Public", "Technology");
+
+
+
+// like a post
+function likePost(userID, postID) {
+    try {
+        // Find the post document by its ID
+        const post = db.post.findOne({ PostID: postID });
+
+        if (!post) {
+            print("Error: Post not found.");
+            return;
+        }
+
+        // Check if the post belongs to a group and if the user is a member of that group
+        if (post.GroupID) {
+            const groupMember = db.groupMembers.findOne({ GroupID: post.GroupID, UserID: userID });
+            if (!groupMember) {
+                print("Error: User is not a member of the group.");
+                return;
+            }
+        }
+
+        // Check if the like already exists
+        const existingLike = db.postLikes.findOne({ UserID: userID, PostID: postID });
+        if (existingLike) {
+            print("Error: User has already liked this post.");
+            return;
+        }
+
+        // Insert the like record
+        const like = {
+            UserID: userID,
+            PostID: postID,
+            Timestamp: new Date()
+        };
+
+        db.postLikes.insertOne(like);
+
+        // Increment the Likes count
+        const updatedLikes = post.Likes + 1;
+
+        // Update the post document with the incremented Likes count
+        const result = db.post.updateOne(
+            { PostID: postID },
+            { $set: { Likes: updatedLikes } }
+        );
+
+        if (result.modifiedCount === 0) {
+            print("Error: Failed to update Likes count.");
+            return;
+        }
+
+        // Determine the recipient of the notification
+        let notificationUserID;
+        if (post.AuthorType === "Page") {
+            const page = db.page.findOne({ PageID: post.AuthorID });
+            if (page) {
+                notificationUserID = page.CreatorUserID;
+            } else {
+                print("Error: Page not found.");
+                return;
+            }
+        } else if (post.AuthorType === "User") {
+            notificationUserID = post.AuthorID;
+        } else {
+            print("Error: Invalid AuthorType.");
+            return;
+        }
+
+        // Create a notification
+        const notification = {
+            UserID: notificationUserID,
+            SenderID: userID,
+            PostID: postID,
+            Timestamp: new Date(),
+            Status: "Unread",
+            NotificationType: "Post Like"
+        };
+
+        db.notification.insertOne(notification);
+
+        print("Post liked successfully by UserID: " + userID);
+    } catch (e) {
+        print("Error liking post: " + e);
+    }
+}
+
+// Usage example
+likePost(8, 5); // UserID 8 likes PostID 5
+
+// delete a like from a post
+function deleteLike(userID, postID) {
+    try {
+        // Find the like record
+        const like = db.postLikes.findOne({ UserID: userID, PostID: postID });
+
+        if (!like) {
+            print("Error: Like not found.");
+            return;
+        }
+
+        // Delete the like record
+        const deleteResult = db.postLikes.deleteOne({ UserID: userID, PostID: postID });
+
+        if (deleteResult.deletedCount === 0) {
+            print("Error: Failed to delete like.");
+            return;
+        }
+
+        // Find the post document by its ID
+        const post = db.post.findOne({ PostID: postID });
+
+        if (!post) {
+            print("Error: Post not found.");
+            return;
+        }
+
+        // Decrement the Likes count
+        const updatedLikes = post.Likes - 1;
+
+        // Update the post document with the decremented Likes count
+        const updateResult = db.post.updateOne(
+            { PostID: postID },
+            { $set: { Likes: updatedLikes } }
+        );
+
+        if (updateResult.modifiedCount === 0) {
+            print("Error: Failed to update Likes count in the posts collection.");
+            return;
+        }
+
+        print("Like deleted successfully by UserID: " + userID);
+    } catch (e) {
+        print("Error deleting like: " + e);
+    }
+}
+
+// Usage example
+deleteLike(1, 123); // Delete like for UserID 1 and PostID 123
+
+
