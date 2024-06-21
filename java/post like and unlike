@@ -1,0 +1,161 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
+import org.bson.Document;
+
+import java.util.Date;
+
+public class PostService {
+
+    private final MongoDatabase db;
+
+    public PostService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    public void likePost(int userID, int postID) {
+        try {
+            // Find the post document by its ID
+            MongoCollection<Document> postCollection = db.getCollection("post");
+            Document post = postCollection.find(Filters.eq("PostID", postID)).first();
+
+            if (post == null) {
+                System.out.println("Error: Post not found.");
+                return;
+            }
+
+            // Check if the post belongs to a group and if the user is a member of that group
+            if (post.containsKey("GroupID")) {
+                MongoCollection<Document> groupMembersCollection = db.getCollection("groupMembers");
+                Document groupMember = groupMembersCollection.find(Filters.and(
+                        Filters.eq("GroupID", post.getInteger("GroupID")),
+                        Filters.eq("UserID", userID)
+                )).first();
+                if (groupMember == null) {
+                    System.out.println("Error: User is not a member of the group.");
+                    return;
+                }
+            }
+
+            // Check if the like already exists
+            MongoCollection<Document> postLikesCollection = db.getCollection("postLikes");
+            Document existingLike = postLikesCollection.find(Filters.and(
+                    Filters.eq("UserID", userID),
+                    Filters.eq("PostID", postID)
+            )).first();
+            if (existingLike != null) {
+                System.out.println("Error: User has already liked this post.");
+                return;
+            }
+
+            // Insert the like record
+            Document like = new Document("UserID", userID)
+                    .append("PostID", postID)
+                    .append("Timestamp", new Date());
+
+            postLikesCollection.insertOne(like);
+
+            // Increment the Likes count
+            int updatedLikes = post.getInteger("Likes") + 1;
+
+            // Update the post document with the incremented Likes count
+            postCollection.updateOne(
+                    Filters.eq("PostID", postID),
+                    Updates.set("Likes", updatedLikes)
+            );
+
+            // Determine the recipient of the notification
+            int notificationUserID;
+            if (post.getString("AuthorType").equals("Page")) {
+                MongoCollection<Document> pageCollection = db.getCollection("page");
+                Document page = pageCollection.find(Filters.eq("PageID", post.getInteger("AuthorID"))).first();
+                if (page != null) {
+                    notificationUserID = page.getInteger("CreatorUserID");
+                } else {
+                    System.out.println("Error: Page not found.");
+                    return;
+                }
+            } else if (post.getString("AuthorType").equals("User")) {
+                notificationUserID = post.getInteger("AuthorID");
+            } else {
+                System.out.println("Error: Invalid AuthorType.");
+                return;
+            }
+
+            // Create a notification
+            Document notification = new Document("UserID", notificationUserID)
+                    .append("SenderID", userID)
+                    .append("PostID", postID)
+                    .append("Timestamp", new Date())
+                    .append("Status", "Unread")
+                    .append("NotificationType", "Post Like");
+
+            MongoCollection<Document> notificationCollection = db.getCollection("notification");
+            notificationCollection.insertOne(notification);
+
+            System.out.println("Post liked successfully by UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error liking post: " + e.getMessage());
+        }
+    }
+
+    public void deleteLike(int userID, int postID) {
+        try {
+            // Find the like record
+            MongoCollection<Document> postLikesCollection = db.getCollection("postLikes");
+            Document like = postLikesCollection.find(Filters.and(
+                    Filters.eq("UserID", userID),
+                    Filters.eq("PostID", postID)
+            )).first();
+
+            if (like == null) {
+                System.out.println("Error: Like not found.");
+                return;
+            }
+
+            // Delete the like record
+            postLikesCollection.deleteOne(Filters.and(
+                    Filters.eq("UserID", userID),
+                    Filters.eq("PostID", postID)
+            ));
+
+            // Find the post document by its ID
+            MongoCollection<Document> postCollection = db.getCollection("post");
+            Document post = postCollection.find(Filters.eq("PostID", postID)).first();
+
+            if (post == null) {
+                System.out.println("Error: Post not found.");
+                return;
+            }
+
+            // Decrement the Likes count
+            int updatedLikes = post.getInteger("Likes") - 1;
+
+            // Update the post document with the decremented Likes count
+            postCollection.updateOne(
+                    Filters.eq("PostID", postID),
+                    Updates.set("Likes", updatedLikes)
+            );
+
+            System.out.println("Like deleted successfully by UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error deleting like: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of PostService
+        PostService postService = new PostService(database);
+
+        // Usage examples
+        postService.likePost(8, 5); // UserID 8 likes PostID 5
+        postService.deleteLike(1, 123); // Delete like for UserID 1 and PostID 123
+    }
+}
