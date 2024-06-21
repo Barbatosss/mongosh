@@ -1,0 +1,164 @@
+// prevent duplicate pairs (query once)
+db.friendship.createIndex({ senderID: 1, receiverID: 1 }, { unique: true });
+
+function createFriendship(senderID, receiverID) {
+    if (senderID === receiverID) {
+        print("Error: senderID and receiverID cannot be the same.");
+        return;
+    }
+    
+    // Check if there is already a friendship between senderID and receiverID, ignoring the "Declined" status
+    const existingFriendship = db.friendship.findOne({
+        $or: [
+            { senderID: senderID, receiverID: receiverID, Status: { $ne: "Declined" } },
+            { senderID: receiverID, receiverID: senderID, Status: { $ne: "Declined" } }
+        ]
+    });
+
+    // Log the existing friendship for debugging
+    print("Existing Friendship:", existingFriendship);
+
+    // If an existing friendship is found and its status is not "Declined", prevent duplicate pairs
+    if (existingFriendship && existingFriendship.Status !== "Declined") {
+        print("Error: Friendship between senderID and receiverID already exists or is pending.");
+        return;
+    }
+
+    // Get the highest FriendshipID
+    const highestFriendship = db.friendship.findOne({}, { FriendshipID: 1 }, { sort: { FriendshipID: -1 } });
+
+    // Increment the FriendshipID
+    const newFriendshipID = highestFriendship ? highestFriendship.FriendshipID + 1 : 1;
+
+    // Create the friendship object
+    const friendship = {
+        FriendshipID: newFriendshipID,
+        senderID: senderID,
+        receiverID: receiverID,
+        Status: "Pending",
+        Timestamp: new Date()
+    };
+
+    try {
+        // Insert the friendship document into the collection
+        db.friendship.insertOne(friendship);
+
+        // Insert a corresponding document into the notification collection
+        db.notification.insertOne({
+            UserID: friendship.receiverID,
+            SenderID: friendship.senderID,
+            Timestamp: new Date(),
+            Status: "Unread",
+            NotificationType: "Friend request"
+        });
+
+        print("Friendship and notification document created successfully.");
+    } catch (e) {
+        print("Error creating friendship: " + e);
+    }
+}
+
+// Friend request query, use this to create a document for both friendship collection and notification collection
+createFriendship(1, 2);
+
+// accept
+function updateToAccepted(senderID, receiverID, newStatus) {
+    try {
+        // Update the friendship document
+        const result = db.friendship.updateOne(
+            { senderID: senderID, receiverID: receiverID, Status: "Pending" },
+            { $set: { Status: newStatus } }
+        );
+
+        if (result.modifiedCount === 0) {
+            print("No pending friendship found to update.");
+            return;
+        }
+
+        // Create a new notification for the sender to inform about the acceptance
+        const notification = {
+            UserID: senderID,
+            SenderID: receiverID,
+            Timestamp: new Date(),
+            Status: "Unread",
+            NotificationType: "Friend request accepted"
+        };
+
+        const notificationResult = db.notification.insertOne(notification);
+
+        if (notificationResult.acknowledged && notificationResult.insertedId) {
+            print("Friendship status updated and new notification created successfully.");
+        } else {
+            print("Friendship status updated but failed to create new notification.");
+        }
+    } catch (e) {
+        print("Error updating friendship status: " + e);
+    }
+}
+
+// Accept friend request query, use this to accept the friend request and create a new notification
+createFriendship(1, 2);
+updateToAccepted(1, 2, "Accepted");
+
+
+
+// Update status to "Declined" for a specific pair of UserIDs
+function updateToDeclined(senderID, receiverID) {
+    try {
+        // Remove the friendship document
+        const deleteFriendshipResult = db.friendship.deleteOne(
+            { senderID: senderID, receiverID: receiverID, Status: "Pending" }
+        );
+
+        // If the friendship document was deleted successfully
+        if (deleteFriendshipResult.deletedCount > 0) {
+            // Remove the corresponding notification
+            const deleteNotificationResult = db.notification.deleteOne(
+                { UserID: receiverID, SenderID: senderID, Status: "Unread" }
+            );
+
+            if (deleteNotificationResult.deletedCount > 0) {
+                print("Friendship request declined and corresponding notification deleted successfully.");
+            } else {
+                print("Friendship request declined, but no corresponding notification found.");
+            }
+        } else {
+            print("Error: No pending friendship request found for the pair of UserIDs: " + senderID + " and " + receiverID);
+        }
+    } catch (e) {
+        print("Error declining friendship request: " + e);
+    }
+}
+
+// Decline friend request query
+updateToDeclined(1, 2);
+
+
+// unfriend
+function unfriend(userID1, userID2) {
+    try {
+        // Remove the friendship document
+        const result = db.friendship.deleteOne({
+            $or: [
+                { UserID1: userID1, UserID2: userID2, Status: "Accepted" },
+                { UserID1: userID2, UserID2: userID1, Status: "Accepted" }
+            ]
+        });
+
+        if (result.deletedCount === 0) {
+            print("Error: No friendship found to remove.");
+            return;
+        }
+
+        print("Friendship removed successfully between UserID: " + userID1 + " and UserID: " + userID2);
+    } catch (e) {
+        print("Error unfriending: " + e);
+    }
+}
+
+// Usage example
+unfriend(1, 2); // Unfriend user IDs 1 and 2
+
+
+
+
