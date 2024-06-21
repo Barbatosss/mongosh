@@ -1,0 +1,92 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Updates;
+import org.bson.Document;
+
+import java.util.List;
+import java.util.stream.Collectors;
+
+public class CategoryService {
+
+    private final MongoDatabase db;
+
+    public CategoryService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    // Add CategoryIDs to a user
+    public void selectCategories(int userID, List<Integer> categoryIDs) {
+        try {
+            // Check if the category IDs exist in the category collection
+            MongoCollection<Document> categoryCollection = db.getCollection("category");
+            List<Integer> existingCategories = categoryCollection.find(Filters.in("CategoryID", categoryIDs))
+                    .into(new ArrayList<>())
+                    .stream()
+                    .map(doc -> doc.getInteger("CategoryID"))
+                    .collect(Collectors.toList());
+
+            // Determine the valid category IDs
+            List<Integer> validCategoryIDs = categoryIDs.stream()
+                    .filter(existingCategories::contains)
+                    .collect(Collectors.toList());
+
+            if (validCategoryIDs.isEmpty()) {
+                System.out.println("Error: None of the provided CategoryIDs exist.");
+                return;
+            }
+
+            // Add the valid category IDs to the user's PreferredCategories array
+            MongoCollection<Document> userCollection = db.getCollection("user");
+            Document result = userCollection.updateOne(
+                    Filters.eq("UserID", userID),
+                    Updates.addEachToSet("PreferredCategories", validCategoryIDs)
+            ).getModifiedCount();
+
+            if (result == 0) {
+                System.out.println("Error: Failed to add CategoryIDs.");
+                return;
+            }
+
+            System.out.println("CategoryIDs added successfully to UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error adding CategoryIDs to user: " + e.getMessage());
+        }
+    }
+
+    // Remove CategoryIDs from a user
+    public void deselectCategories(int userID, List<Integer> categoryIDs) {
+        try {
+            // Remove the category IDs from the user's PreferredCategories array
+            MongoCollection<Document> userCollection = db.getCollection("user");
+            Document result = userCollection.updateOne(
+                    Filters.eq("UserID", userID),
+                    Updates.pullAll("PreferredCategories", categoryIDs)
+            ).getModifiedCount();
+
+            if (result == 0) {
+                System.out.println("Error: Failed to remove CategoryIDs.");
+                return;
+            }
+
+            System.out.println("CategoryIDs removed successfully from UserID: " + userID);
+        } catch (Exception e) {
+            System.out.println("Error removing CategoryIDs from user: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of CategoryService
+        CategoryService categoryService = new CategoryService(database);
+
+        // Usage examples
+        categoryService.selectCategories(1, Arrays.asList(101, 102, 103)); // Add CategoryIDs 101, 102, 103 to UserID 1
+        categoryService.deselectCategories(1, Arrays.asList(101, 102)); // Remove CategoryIDs 101, 102 from UserID 1
+    }
+}
