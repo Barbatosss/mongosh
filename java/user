@@ -2,12 +2,17 @@ import com.mongodb.MongoClient;
 import com.mongodb.MongoClientURI;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Aggregates;
 import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Sorts;
+import com.mongodb.client.model.Updates;
 import org.bson.Document;
+import org.bson.conversions.Bson;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
+import java.util.Arrays;
 import java.util.Date;
-import java.util.regex.Pattern;
+import java.util.concurrent.TimeUnit;
 
 public class UserService {
 
@@ -17,52 +22,49 @@ public class UserService {
         this.db = database;
     }
 
-    public void createUserPost(int userID, String content, String privacySetting, String categoryName) {
+    public void createUser(String fullName, String email, String password, String dateOfBirth, String gender, String location, String relationshipStatus, String bio) {
+        // Find the highest UserID
+        MongoCollection<Document> userCollection = db.getCollection("user");
+        Document highestUser = userCollection.find().sort(new Document("UserID", -1)).first();
+
+        // Increment the UserID
+        int newUserID = highestUser != null ? highestUser.getInteger("UserID") + 1 : 1;
+
+        // Parse the dateOfBirth string to Date
+        Date dob = Date.from(LocalDate.parse(dateOfBirth).atStartOfDay(ZoneId.systemDefault()).toInstant());
+
+        // Create the user object
+        Document user = new Document("UserID", newUserID)
+                .append("FullName", fullName)
+                .append("Email", email)
+                .append("Password", password)
+                .append("DateOfBirth", dob)
+                .append("Gender", gender)
+                .append("Location", location)
+                .append("RelationshipStatus", relationshipStatus)
+                .append("Bio", bio)
+                .append("AccountCreationTimestamp", new Date());
+
         try {
-            // Check if the category exists
-            MongoCollection<Document> categoryCollection = db.getCollection("category");
-            Document category = categoryCollection.find(Filters.regex("CategoryName", Pattern.compile("^" + categoryName + "$", Pattern.CASE_INSENSITIVE))).first();
+            // Insert the user into the user collection
+            userCollection.insertOne(user);
 
-            // If the category does not exist, create it
-            if (category == null) {
-                // Generate a new CategoryID
-                Document highestCategory = categoryCollection.find().sort(Sorts.descending("CategoryID")).first();
-                int newCategoryID = (highestCategory != null) ? highestCategory.getInteger("CategoryID") + 1 : 1;
+            // Calculate age and update the user document
+            Bson addFields = Aggregates.addFields(new Document("Age", new Document("$floor", new Document("$divide", Arrays.asList(
+                    new Document("$subtract", Arrays.asList(new Date(), "$DateOfBirth")),
+                    1000 * 60 * 60 * 24 * 365.25
+            )))));
 
-                // Create the category object
-                category = new Document("CategoryID", newCategoryID)
-                        .append("CategoryName", categoryName)
-                        .append("CreationDate", new Date());
-
-                // Insert the category into the database
-                categoryCollection.insertOne(category);
-
-                System.out.println("Category added successfully with CategoryID: " + newCategoryID);
+            for (Document doc : userCollection.aggregate(Arrays.asList(addFields))) {
+                userCollection.updateOne(
+                        Filters.eq("_id", doc.getObjectId("_id")),
+                        Updates.set("Age", doc.getInteger("Age"))
+                );
             }
 
-            // Find the highest PostID
-            MongoCollection<Document> postCollection = db.getCollection("post");
-            Document highestPost = postCollection.find().sort(Sorts.descending("PostID")).first();
-
-            // Increment the PostID
-            int newPostID = (highestPost != null) ? highestPost.getInteger("PostID") + 1 : 1;
-
-            // Create the post object
-            Document post = new Document("PostID", newPostID)
-                    .append("AuthorType", "User")
-                    .append("AuthorID", userID)
-                    .append("Content", content)
-                    .append("PrivacySetting", privacySetting)
-                    .append("CategoryID", category.getInteger("CategoryID"))
-                    .append("Timestamp", new Date())
-                    .append("Likes", 0); // Initial likes is 0
-
-            // Insert the post into the posts collection
-            postCollection.insertOne(post);
-
-            System.out.println("Post created successfully with PostID: " + newPostID);
+            System.out.println("User created successfully with UserID: " + newUserID);
         } catch (Exception e) {
-            System.out.println("Error creating post: " + e.getMessage());
+            System.out.println("Error creating user: " + e.getMessage());
         }
     }
 
@@ -75,6 +77,15 @@ public class UserService {
         UserService userService = new UserService(database);
 
         // Sample usage
-        userService.createUserPost(1, "This is a user's post.", "Public", "Technology");
+        userService.createUser(
+                "Sabine Callas",
+                "viper@example.com",
+                "toxic123",
+                "1986-08-03",
+                "Female",
+                "United States",
+                "Single",
+                "A scientist focused on toxicology"
+        );
     }
 }
