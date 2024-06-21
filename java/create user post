@@ -1,0 +1,80 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Sorts;
+import org.bson.Document;
+
+import java.util.Date;
+import java.util.regex.Pattern;
+
+public class UserService {
+
+    private final MongoDatabase db;
+
+    public UserService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    public void createUserPost(int userID, String content, String privacySetting, String categoryName) {
+        try {
+            // Check if the category exists
+            MongoCollection<Document> categoryCollection = db.getCollection("category");
+            Document category = categoryCollection.find(Filters.regex("CategoryName", Pattern.compile("^" + categoryName + "$", Pattern.CASE_INSENSITIVE))).first();
+
+            // If the category does not exist, create it
+            if (category == null) {
+                // Generate a new CategoryID
+                Document highestCategory = categoryCollection.find().sort(Sorts.descending("CategoryID")).first();
+                int newCategoryID = (highestCategory != null) ? highestCategory.getInteger("CategoryID") + 1 : 1;
+
+                // Create the category object
+                category = new Document("CategoryID", newCategoryID)
+                        .append("CategoryName", categoryName)
+                        .append("CreationDate", new Date());
+
+                // Insert the category into the database
+                categoryCollection.insertOne(category);
+
+                System.out.println("Category added successfully with CategoryID: " + newCategoryID);
+            }
+
+            // Find the highest PostID
+            MongoCollection<Document> postCollection = db.getCollection("post");
+            Document highestPost = postCollection.find().sort(Sorts.descending("PostID")).first();
+
+            // Increment the PostID
+            int newPostID = (highestPost != null) ? highestPost.getInteger("PostID") + 1 : 1;
+
+            // Create the post object
+            Document post = new Document("PostID", newPostID)
+                    .append("AuthorType", "User")
+                    .append("AuthorID", userID)
+                    .append("Content", content)
+                    .append("PrivacySetting", privacySetting)
+                    .append("CategoryID", category.getInteger("CategoryID"))
+                    .append("Timestamp", new Date())
+                    .append("Likes", 0); // Initial likes is 0
+
+            // Insert the post into the posts collection
+            postCollection.insertOne(post);
+
+            System.out.println("Post created successfully with PostID: " + newPostID);
+        } catch (Exception e) {
+            System.out.println("Error creating post: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of UserService
+        UserService userService = new UserService(database);
+
+        // Sample usage
+        userService.createUserPost(1, "This is a user's post.", "Public", "Technology");
+    }
+}
