@@ -1,0 +1,100 @@
+
+// Add CategoryIDs to a user
+function selectCategories(userID, categoryIDs) {
+    try {
+        // Check if the category IDs exist in the category collection
+        const existingCategories = db.category.find({ CategoryID: { $in: categoryIDs } }).toArray().map(c => c.CategoryID);
+
+        // Determine the valid category IDs
+        const validCategoryIDs = categoryIDs.filter(id => existingCategories.includes(id));
+
+        if (validCategoryIDs.length === 0) {
+            print("Error: None of the provided CategoryIDs exist.");
+            return;
+        }
+
+        // Add the valid category IDs to the user's CategoryIDs array
+        const result = db.user.updateOne(
+            { UserID: userID },
+            { $addToSet: { PreferredCategories: { $each: validCategoryIDs } } }
+        );
+
+        if (result.modifiedCount === 0) {
+            print("Error: Failed to add CategoryIDs.");
+            return;
+        }
+
+        print("CategoryIDs added successfully to UserID: " + userID);
+    } catch (e) {
+        print("Error adding CategoryIDs to user: " + e);
+    }
+}
+
+// Usage example
+selectCategories(1, [101, 102, 103]); // Add CategoryIDs 101, 102, 103 to UserID 1
+
+
+
+// Remove CategoryIDs from a user
+function deselectCategories(userID, categoryIDs) {
+    try {
+        // Remove the category IDs from the user's CategoryIDs array
+        const result = db.user.updateOne(
+            { UserID: userID },
+            { $pull: { CategoryIDs: { $in: categoryIDs } } }
+        );
+
+        if (result.modifiedCount === 0) {
+            print("Error: Failed to remove CategoryIDs.");
+            return;
+        }
+
+        print("CategoryIDs removed successfully from UserID: " + userID);
+    } catch (e) {
+        print("Error removing CategoryIDs from user: " + e);
+    }
+}
+
+// Usage example
+deselectCategories(1, [101, 102]); // Remove CategoryIDs 101, 102 from UserID 1
+
+
+// add a category
+function addCategory(categoryName) {
+    try {
+        // Check if a category with the same name already exists
+        const existingCategory = db.category.findOne({ CategoryName: { $regex: new RegExp('^' + categoryName + '$', 'i') } });
+
+        if (existingCategory) {
+            throw new Error("A category with this name already exists.");
+        }
+
+        // Generate a new CategoryID
+        const highestCategory = db.category.findOne({}, { CategoryID: 1 }, { sort: { CategoryID: -1 } });
+        const newCategoryID = highestCategory ? highestCategory.CategoryID + 1 : 1;
+
+        // Create the category object
+        const category = {
+            CategoryID: newCategoryID,
+            CategoryName: categoryName,
+            CreationDate: new Date()
+        };
+
+        // Insert the category into the database
+        const result = db.category.insertOne(category);
+
+        if (result.insertedCount === 0) {
+            throw new Error("Failed to insert category.");
+        }
+
+        print("Category added successfully with CategoryID: " + newCategoryID);
+    } catch (e) {
+        print("Error adding category: " + e);
+    }
+}
+
+// Usage example
+addCategory("Technology");
+
+
+
