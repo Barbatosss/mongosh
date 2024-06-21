@@ -1,0 +1,121 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.IndexOptions;
+import com.mongodb.client.model.Indexes;
+import org.bson.Document;
+
+import java.util.Date;
+
+public class GroupPostService {
+
+    private final MongoDatabase db;
+
+    public GroupPostService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    // Function to create a group post
+    public void createGroupPost(int groupID, int userID, String content, String privacySetting, String categoryName) {
+        MongoCollection<Document> groupCollection = db.getCollection("group");
+        MongoCollection<Document> groupMembersCollection = db.getCollection("groupMembers");
+        MongoCollection<Document> categoryCollection = db.getCollection("category");
+        MongoCollection<Document> postCollection = db.getCollection("post");
+        MongoCollection<Document> notificationCollection = db.getCollection("notification");
+
+        try {
+            // Check if the group exists
+            Document group = groupCollection.find(new Document("GroupID", groupID)).first();
+
+            if (group == null) {
+                System.out.println("Error: Group not found.");
+                return;
+            }
+
+            // Check if the user is a member of the group
+            Document member = groupMembersCollection.find(new Document("GroupID", groupID).append("UserID", userID)).first();
+
+            if (member == null) {
+                System.out.println("Error: User is not a member of the group.");
+                return;
+            }
+
+            // Check if the category exists
+            Document category = categoryCollection.find(new Document("CategoryName", new Document("$regex", "^" + categoryName + "$").append("$options", "i"))).first();
+
+            // If the category does not exist, create it
+            if (category == null) {
+                // Generate a new CategoryID
+                Document highestCategory = categoryCollection.find()
+                        .sort(new Document("CategoryID", -1))
+                        .limit(1)
+                        .first();
+
+                int newCategoryID = highestCategory != null ? highestCategory.getInteger("CategoryID") + 1 : 1;
+
+                // Create the category object
+                category = new Document("CategoryID", newCategoryID)
+                        .append("CategoryName", categoryName)
+                        .append("CreationDate", new Date());
+
+                // Insert the category into the database
+                categoryCollection.insertOne(category);
+
+                System.out.println("Category added successfully with CategoryID: " + newCategoryID);
+            }
+
+            // Generate a new PostID
+            Document highestPost = postCollection.find()
+                    .sort(new Document("PostID", -1))
+                    .limit(1)
+                    .first();
+
+            int newPostID = highestPost != null ? highestPost.getInteger("PostID") + 1 : 1;
+
+            // Create the post object
+            Document post = new Document("PostID", newPostID)
+                    .append("AuthorType", "User")
+                    .append("AuthorID", userID)
+                    .append("GroupID", groupID)
+                    .append("Content", content)
+                    .append("PrivacySetting", privacySetting)
+                    .append("CategoryID", category.getInteger("CategoryID"))
+                    .append("Timestamp", new Date())
+                    .append("Likes", 0);
+
+            postCollection.insertOne(post);
+
+            // Send notifications to all group members except the author
+            groupMembersCollection.find(new Document("GroupID", groupID).append("UserID", new Document("$ne", userID)))
+                    .forEach(memberDoc -> {
+                        Document notification = new Document("UserID", memberDoc.getInteger("UserID"))
+                                .append("SenderID", userID)
+                                .append("GroupID", groupID)
+                                .append("PostID", newPostID)
+                                .append("Timestamp", new Date())
+                                .append("Status", "Unread")
+                                .append("NotificationType", "Group Post");
+
+                        notificationCollection.insertOne(notification);
+                    });
+
+            System.out.println("Group post created successfully with PostID: " + newPostID);
+            System.out.println("Notifications sent to group members.");
+        } catch (Exception e) {
+            System.out.println("Error creating group post or sending notifications: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of GroupPostService
+        GroupPostService groupPostService = new GroupPostService(database);
+
+        // Usage example
+        groupPostService.createGroupPost(1, 2, "This is a new post in the group.", "Public", "Technology");
+    }
+}
