@@ -1,0 +1,60 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import org.bson.Document;
+
+import java.util.Date;
+import java.util.regex.Pattern;
+
+public class CategoryService {
+
+    private final MongoDatabase db;
+
+    public CategoryService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    // Add a category
+    public void addCategory(String categoryName) {
+        try {
+            // Check if a category with the same name already exists
+            MongoCollection<Document> categoryCollection = db.getCollection("category");
+            Pattern categoryPattern = Pattern.compile("^" + categoryName + "$", Pattern.CASE_INSENSITIVE);
+            Document existingCategory = categoryCollection.find(Filters.regex("CategoryName", categoryPattern)).first();
+
+            if (existingCategory != null) {
+                throw new Exception("A category with this name already exists.");
+            }
+
+            // Generate a new CategoryID
+            Document highestCategory = categoryCollection.find().sort(new Document("CategoryID", -1)).first();
+            int newCategoryID = highestCategory != null ? highestCategory.getInteger("CategoryID") + 1 : 1;
+
+            // Create the category object
+            Document category = new Document("CategoryID", newCategoryID)
+                    .append("CategoryName", categoryName)
+                    .append("CreationDate", new Date());
+
+            // Insert the category into the database
+            categoryCollection.insertOne(category);
+
+            System.out.println("Category added successfully with CategoryID: " + newCategoryID);
+        } catch (Exception e) {
+            System.out.println("Error adding category: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of CategoryService
+        CategoryService categoryService = new CategoryService(database);
+
+        // Usage example
+        categoryService.addCategory("Technology");
+    }
+}
