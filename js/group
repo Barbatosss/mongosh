@@ -1,0 +1,221 @@
+// create a group
+function createGroup(userID, groupName, description, privacySetting = "Public") {
+    try {
+        // Generate a new GroupID
+        const highestGroup = db.group.findOne({}, { GroupID: 1 }, { sort: { GroupID: -1 } });
+        const newGroupID = highestGroup ? highestGroup.GroupID + 1 : 1;
+
+        // Create the group object
+        const group = {
+            GroupID: newGroupID,
+            CreatorUserID: userID,
+            GroupName: groupName,
+            Description: description,
+            PrivacySetting: privacySetting,
+            CreationDate: new Date(),
+            MemberCount: 1
+        };
+
+        // Insert the group into the database
+        db.group.insertOne(group);
+
+        // Add the creator as a member of the group with the role "Creator"
+        const member = {
+            GroupID: newGroupID,
+            UserID: userID,
+            Role: "Creator",
+            JoinDate: new Date()
+        };
+
+        db.groupMembers.insertOne(member);
+
+        print("Group created successfully with GroupID: " + newGroupID);
+    } catch (e) {
+        print("Error creating group: " + e);
+    }
+}
+
+// create group query
+createGroup(1, "Test group", "A group", "Public");
+
+// join group
+function joinGroup(userID, groupID) {
+    try {
+        // Check if the group exists
+        const group = db.group.findOne({ GroupID: groupID });
+
+        if (!group) {
+            print("Error: Group not found.");
+            return;
+        }
+
+        // Check if the user is already a member
+        const existingMember = db.groupMembers.findOne({ UserID: userID, GroupID: groupID });
+        if (existingMember) {
+            print("Error: User is already a member of the group.");
+            return;
+        }
+
+        // Add the user as a member of the group with the role "Member"
+        const member = {
+            GroupID: groupID,
+            UserID: userID,
+            Role: "Member",
+            JoinDate: new Date()
+        };
+
+        db.groupMembers.insertOne(member);
+
+        // Increment the MemberCount
+        db.group.updateOne(
+            { GroupID: groupID },
+            { $inc: { MemberCount: 1 } }
+        );
+
+        // Create a notification for the group creator
+        const notification = {
+            UserID: group.CreatorUserID,
+            SenderID: userID,
+            Timestamp: new Date(),
+            Status: "Unread",
+            NotificationType: "Join Group"
+        };
+
+        db.notification.insertOne(notification);
+
+        print("UserID " + userID + " joined group with GroupID: " + groupID);
+    } catch (e) {
+        print("Error joining group: " + e);
+    }
+}
+
+db.groupMembers.createIndex({ GroupID: 1, UserID: 1 }, { unique: true });(query once)
+
+// Usage example
+joinGroup(2, 1); // UserID 2 joins GroupID 1
+
+function leaveGroup(userID, groupID) {
+    try {
+        // Check if the user is a member of the group
+        const member = db.groupMembers.findOne({ UserID: userID, GroupID: groupID });
+
+        if (!member) {
+            print("Error: User is not a member of the group.");
+            return;
+        }
+
+        // Delete the membership record
+        const deleteResult = db.groupMembers.deleteOne({ UserID: userID, GroupID: groupID });
+
+        if (deleteResult.deletedCount === 0) {
+            print("Error: Failed to delete membership record.");
+            return;
+        }
+
+        // Decrement the MemberCount
+        db.group.updateOne(
+            { GroupID: groupID },
+            { $inc: { MemberCount: -1 } }
+        );
+
+        print("UserID " + userID + " left group with GroupID: " + groupID);
+    } catch (e) {
+        print("Error leaving group: " + e);
+    }
+}
+
+// Usage example
+leaveGroup(2, 1); // UserID 2 leaves GroupID 1
+
+
+// create group post
+function createGroupPost(groupID, userID, content, privacySetting, categoryName) {
+    try {
+        // Check if the group exists
+        const group = db.group.findOne({ GroupID: groupID });
+
+        if (!group) {
+            print("Error: Group not found.");
+            return;
+        }
+
+        // Check if the user is a member of the group
+        const member = db.groupMembers.findOne({ GroupID: groupID, UserID: userID });
+
+        if (!member) {
+            print("Error: User is not a member of the group.");
+            return;
+        }
+
+        // Check if the category exists
+        let category = db.category.findOne({ CategoryName: { $regex: new RegExp('^' + categoryName + '$', 'i') } });
+
+        // If the category does not exist, create it
+        if (!category) {
+            // Generate a new CategoryID
+            const highestCategory = db.category.findOne({}, { CategoryID: 1 }, { sort: { CategoryID: -1 } });
+            const newCategoryID = highestCategory ? highestCategory.CategoryID + 1 : 1;
+
+            // Create the category object
+            category = {
+                CategoryID: newCategoryID,
+                CategoryName: categoryName,
+                CreationDate: new Date()
+            };
+
+            // Insert the category into the database
+            const categoryResult = db.category.insertOne(category);
+
+            if (categoryResult.insertedCount === 0) {
+                throw new Error("Failed to insert category.");
+            }
+
+            print("Category added successfully with CategoryID: " + newCategoryID);
+        }
+
+        // Generate a new PostID
+        const highestPost = db.post.findOne({}, { PostID: 1 }, { sort: { PostID: -1 } });
+        const newPostID = highestPost ? highestPost.PostID + 1 : 1;
+
+        // Create the post object
+        const post = {
+            PostID: newPostID,
+            AuthorType: "User",
+            AuthorID: userID,
+            GroupID: groupID, 
+            Content: content,
+            PrivacySetting: privacySetting,
+            CategoryID: category.CategoryID,
+            Timestamp: new Date(),
+            Likes: 0 // Initial likes is 0
+        };
+
+        db.post.insertOne(post);
+
+        // Send notifications to all group members except the author
+        const groupMembers = db.groupMembers.find({ GroupID: groupID, UserID: { $ne: userID } }).toArray();
+        groupMembers.forEach(function(member) {
+            const notification = {
+                UserID: member.UserID,
+                SenderID: userID,
+                GroupID: groupID,
+                PostID: newPostID,
+                Timestamp: new Date(),
+                Status: "Unread",
+                NotificationType: "Group Post"
+            };
+
+            db.notification.insertOne(notification);
+        });
+
+        print("Group post created successfully with PostID: " + newPostID);
+        print("Notifications sent to group members.");
+    } catch (e) {
+        print("Error creating group post or sending notifications: " + e);
+    }
+}
+
+// Usage example
+createGroupPost(1, 2, "This is a new post in the group.", "Public", "Technology");
+
+
