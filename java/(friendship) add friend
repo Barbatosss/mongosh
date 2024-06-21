@@ -1,0 +1,88 @@
+import com.mongodb.MongoClient;
+import com.mongodb.MongoClientURI;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoDatabase;
+import com.mongodb.client.model.Filters;
+import org.bson.Document;
+
+import java.util.Date;
+
+public class FriendshipService {
+
+    private final MongoDatabase db;
+
+    public FriendshipService(MongoDatabase database) {
+        this.db = database;
+    }
+
+    // Create a friendship
+    public void createFriendship(int senderID, int receiverID) {
+        if (senderID == receiverID) {
+            System.out.println("Error: senderID and receiverID cannot be the same.");
+            return;
+        }
+
+        MongoCollection<Document> friendshipCollection = db.getCollection("friendship");
+        MongoCollection<Document> notificationCollection = db.getCollection("notification");
+
+        // Check if there is already a friendship between senderID and receiverID, ignoring the "Declined" status
+        Document existingFriendship = friendshipCollection.find(
+            Filters.or(
+                Filters.and(Filters.eq("senderID", senderID), Filters.eq("receiverID", receiverID), Filters.ne("Status", "Declined")),
+                Filters.and(Filters.eq("senderID", receiverID), Filters.eq("receiverID", senderID), Filters.ne("Status", "Declined"))
+            )
+        ).first();
+
+        // Log the existing friendship for debugging
+        System.out.println("Existing Friendship: " + existingFriendship);
+
+        // If an existing friendship is found and its status is not "Declined", prevent duplicate pairs
+        if (existingFriendship != null && !existingFriendship.getString("Status").equals("Declined")) {
+            System.out.println("Error: Friendship between senderID and receiverID already exists or is pending.");
+            return;
+        }
+
+        // Get the highest FriendshipID
+        Document highestFriendship = friendshipCollection.find().sort(new Document("FriendshipID", -1)).first();
+
+        // Increment the FriendshipID
+        int newFriendshipID = highestFriendship != null ? highestFriendship.getInteger("FriendshipID") + 1 : 1;
+
+        // Create the friendship object
+        Document friendship = new Document("FriendshipID", newFriendshipID)
+                .append("senderID", senderID)
+                .append("receiverID", receiverID)
+                .append("Status", "Pending")
+                .append("Timestamp", new Date());
+
+        try {
+            // Insert the friendship document into the collection
+            friendshipCollection.insertOne(friendship);
+
+            // Insert a corresponding document into the notification collection
+            Document notification = new Document("UserID", receiverID)
+                    .append("SenderID", senderID)
+                    .append("Timestamp", new Date())
+                    .append("Status", "Unread")
+                    .append("NotificationType", "Friend request");
+
+            notificationCollection.insertOne(notification);
+
+            System.out.println("Friendship and notification document created successfully.");
+        } catch (Exception e) {
+            System.out.println("Error creating friendship: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Create a MongoDB client and database instance
+        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of FriendshipService
+        FriendshipService friendshipService = new FriendshipService(database);
+
+        // Usage example
+        friendshipService.createFriendship(1, 2);
+    }
+}
