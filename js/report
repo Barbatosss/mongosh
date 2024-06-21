@@ -1,0 +1,64 @@
+// submit a report
+function submitReport(reporterUserID, reportedEntityID, entityType) {
+    try {
+        // Check if the reporter is reporting themselves
+        if (entityType === "User" && reporterUserID === reportedEntityID) {
+            throw new Error("You cannot report yourself.");
+        }
+
+        // Check if the reporter is reporting their own page
+        if (entityType === "Page") {
+            const page = db.page.findOne({ PageID: reportedEntityID });
+            if (page && page.CreatorUserID === reporterUserID) {
+                throw new Error("You cannot report a page you created.");
+            }
+        }
+
+        // Check if the reporter is reporting their own post
+        if (entityType === "Post") {
+            const post = db.post.findOne({ PostID: reportedEntityID });
+            if (post && post.AuthorID === reporterUserID && post.AuthorType === "User") {
+                throw new Error("You cannot report a post you created.");
+            }
+        }
+
+        // Check if the reporter is reporting their own group
+        if (entityType === "Group") {
+            const group = db.group.findOne({ GroupID: reportedEntityID });
+            if (group && group.CreatorUserID === reporterUserID) {
+                throw new Error("You cannot report a group you created.");
+            }
+        }
+
+        // Generate a new ReportID
+        const highestReport = db.report.findOne({}, { ReportID: 1 }, { sort: { ReportID: -1 } });
+        const newReportID = highestReport ? highestReport.ReportID + 1 : 1;
+
+        // Create the report object
+        const report = {
+            ReportID: newReportID,
+            ReporterUserID: reporterUserID,
+            ReportedEntityID: reportedEntityID,
+            EntityType: entityType, // "User", "Page", "Post", "Group"
+            Timestamp: new Date(),
+        };
+
+        // Insert the report into the database
+        const result = db.report.insertOne(report);
+
+        if (result.insertedCount === 0) {
+            throw new Error("Failed to insert report.");
+        }
+
+        print("Report submitted successfully with ReportID: " + newReportID);
+    } catch (e) {
+        print("Error submitting report: " + e);
+    }
+}
+
+submitReport(1, 1, "User",); 
+submitReport(1, 1, "Page",); 
+submitReport(1, 1, "Post",); 
+submitReport(1, 1, "Group",); 
+
+
