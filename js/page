@@ -1,0 +1,231 @@
+// create page
+function createPage(creatorUserID, pageName, description) {
+
+        // get the highest pageID
+        const highestPageID = db.page.findOne({}, { PageID: 1 }, { sort: { PageID: -1 } });
+
+	// increment
+    	const newPageID = highestPageID ? highestPageID.PageID + 1 : 1;
+
+    const page = {
+        PageID: newPageID,
+        CreatorUserID: creatorUserID,
+        PageName: pageName,
+        Description: description,
+        CreationDate: new Date(),
+        Likes: 0 // initial likes is 0
+    };
+
+    try {
+        db.page.insertOne(page);
+
+        print("Page created successfully with PageID: " + newPageID);
+    } catch (e) {
+        print("Error creating page: " + e);
+    }
+}
+
+// create page query
+createPage(1, "My Page", "This is the description of my page.");
+
+// Function to like a page
+function likePage(userID, pageID) {
+    // Find the page document by its ID
+    const page = db.page.findOne({ PageID: pageID });
+
+    if (!page) {
+        print("Error: Page not found.");
+        return;
+    }
+
+    try {
+        // Check if the user has already liked the page
+        const existingLike = db.pageLikes.findOne({ UserID: userID, PageID: pageID });
+
+        if (existingLike) {
+            print("Error: User has already liked this page.");
+            return;
+        }
+
+        // Increment the Likes count
+        const updatedLikes = page.Likes + 1;
+
+        // Update the page document with the incremented Likes count
+        const result = db.page.updateOne(
+            { PageID: pageID },
+            { $set: { Likes: updatedLikes } }
+        );
+
+        if (result.modifiedCount === 0) {
+            print("Error: Failed to update Likes count.");
+            return;
+        }
+
+        // Insert the like record
+        const like = {
+            UserID: userID,
+            PageID: pageID,
+            Timestamp: new Date()
+        };
+
+        db.pageLikes.insertOne(like);
+
+        // Create a notification
+        const notification = {
+            UserID: page.CreatorUserID,
+            SenderID: userID,
+            Status: "Unread",
+            NotificationType: "Page Like",
+            Timestamp: new Date()
+        };
+
+        db.notification.insertOne(notification);
+
+        print("Page liked successfully by UserID: " + userID);
+    } catch (e) {
+        print("Error liking page: " + e);
+    }
+}
+
+// Create a unique index on UserID and PageID
+db.pageLikes.createIndex({ UserID: 1, PageID: 1 }, { unique: true });
+
+// Like a page
+likePage(1, 1); // UserID 1 likes PageID 1
+
+
+
+
+// delete a like
+function deletePageLike(userID, pageID) {
+    try {
+        // Find the like record
+        const like = db.pageLikes.findOne({ UserID: userID, PageID: pageID });
+
+        if (!like) {
+            print("Error: Like not found.");
+            return;
+        }
+
+        // Delete the like record
+        const deleteResult = db.pageLikes.deleteOne({ UserID: userID, PageID: pageID });
+
+        if (deleteResult.deletedCount === 0) {
+            print("Error: Failed to delete like.");
+            return;
+        }
+
+        // Find the page document by its ID
+        const page = db.page.findOne({ PageID: pageID });
+
+        if (!page) {
+            print("Error: Page not found.");
+            return;
+        }
+
+        // Decrement the Likes count
+        const updatedLikes = page.Likes - 1;
+
+        // Update the page document with the decremented Likes count
+        const updateResult = db.page.updateOne(
+            { PageID: pageID },
+            { $set: { Likes: updatedLikes } }
+        );
+
+        if (updateResult.modifiedCount === 0) {
+            print("Error: Failed to update Likes count in the page collection.");
+            return;
+        }
+
+        print("Like deleted successfully by UserID: " + userID);
+    } catch (e) {
+        print("Error deleting like: " + e);
+    }
+}
+
+// delete query
+deletePageLike(1, 123); // Delete like for UserID 1 and PageID 123
+
+// create page post
+function createPagePost(pageID, content, privacySetting, categoryName) {
+    try {
+        // Find the page to get the CreatorUserID
+        const page = db.page.findOne({ PageID: pageID });
+
+        if (!page) {
+            print("Error: Page not found.");
+            return;
+        }
+
+        const authorID = page.CreatorUserID;
+
+        // Check if the category exists
+        let category = db.category.findOne({ CategoryName: { $regex: new RegExp('^' + categoryName + '$', 'i') } });
+
+        // If the category does not exist, create it
+        if (!category) {
+            // Generate a new CategoryID
+            const highestCategory = db.category.findOne({}, { CategoryID: 1 }, { sort: { CategoryID: -1 } });
+            const newCategoryID = highestCategory ? highestCategory.CategoryID + 1 : 1;
+
+            // Create the category object
+            category = {
+                CategoryID: newCategoryID,
+                CategoryName: categoryName,
+                CreationDate: new Date()
+            };
+
+            // Insert the category into the database
+            const categoryResult = db.category.insertOne(category);
+
+            if (categoryResult.insertedCount === 0) {
+                throw new Error("Failed to insert category.");
+            }
+
+            print("Category added successfully with CategoryID: " + newCategoryID);
+        }
+
+        // Generate a new PostID
+        const highestPost = db.post.findOne({}, { PostID: 1 }, { sort: { PostID: -1 } });
+        const newPostID = highestPost ? highestPost.PostID + 1 : 1;
+
+        // Create the post object
+        const post = {
+            PostID: newPostID,
+            AuthorType: "Page",
+            AuthorID: authorID,
+            PageID: pageID,
+            Content: content,
+            PrivacySetting: privacySetting,
+            CategoryID: category.CategoryID,
+            Timestamp: new Date(),
+            Likes: 0 // Initial likes is 0
+        };
+
+        // Insert the post into the database
+        db.post.insertOne(post);
+
+        // Send notifications to users who liked the page
+        const pageLikes = db.pageLikes.find({ PageID: pageID });
+        pageLikes.forEach(function(like) {
+            const notification = {
+                UserID: like.UserID,
+                SenderID: pageID,
+                PostID: newPostID,
+                Timestamp: new Date(),
+                Status: "Unread",
+                NotificationType: "Page Post"
+            };
+            db.notification.insertOne(notification);
+        });
+
+        print("Post created successfully with PostID: " + newPostID);
+        print("Notifications sent.");
+    } catch (e) {
+        print("Error creating post or sending notifications: " + e);
+    }
+}
+
+// Usage example
+createPagePost(1, "This is a new post content", "Public", "Technology");
+
