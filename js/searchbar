@@ -1,0 +1,59 @@
+// searchbar
+function search(queryString) {
+    try {
+        const regex = new RegExp(queryString, 'i'); // Case-insensitive regex for partial matching
+
+        // Initialize an array to store results
+        const results = [];
+
+        // Search for users by name and return FullName with UserID
+        const users = db.user.find({ FullName: { $regex: regex } }, { UserID: 1, FullName: 1 }).toArray();
+        results.push(...users.map(user => ({ type: 'user', name: user.FullName, UserID: user.UserID })));
+
+        // Search for pages by name and return PageName with PageID
+        const pages = db.page.find({ PageName: { $regex: regex } }, { PageID: 1, PageName: 1 }).toArray();
+        results.push(...pages.map(page => ({ type: 'page', name: page.PageName, PageID: page.PageID })));
+
+        // Search for groups by name and return GroupName with GroupID
+        const groups = db.group.find({ GroupName: { $regex: regex } }, { GroupID: 1, GroupName: 1 }).toArray();
+        results.push(...groups.map(group => ({ type: 'group', name: group.GroupName, GroupID: group.GroupID })));
+
+        // Search for posts by content and return Content with PostID and CategoryName
+        const postsByContent = db.post.aggregate([
+            { $match: { Content: { $regex: regex } } },
+            {
+                $lookup: {
+                    from: 'category',
+                    localField: 'CategoryID',
+                    foreignField: 'CategoryID',
+                    as: 'CategoryDetails'
+                }
+            },
+            {
+                $project: {
+                    PostID: 1,
+                    Content: 1,
+                    CategoryName: { $arrayElemAt: ['$CategoryDetails.CategoryName', 0] }
+                }
+            }
+        ]).toArray();
+        results.push(...postsByContent.map(post => ({ type: 'post', content: post.Content, PostID: post.PostID, category: post.CategoryName })));
+
+        // Search for categories by name and return all posts with matching CategoryID
+        const categories = db.category.find({ CategoryName: { $regex: regex } }, { CategoryID: 1, CategoryName: 1 }).toArray();
+        for (const category of categories) {
+            const postsByCategory = db.post.find({ CategoryID: category.CategoryID }, { PostID: 1, Content: 1 }).toArray();
+            results.push(...postsByCategory.map(post => ({ type: 'post', content: post.Content, PostID: post.PostID, category: category.CategoryName })));
+        }
+
+        results.forEach(result => {
+            printjson(result);
+        });
+
+    } catch (e) {
+        print("Error searching: " + e);
+    }
+}
+
+// Usage example:
+search("technology");
