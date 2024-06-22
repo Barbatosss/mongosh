@@ -1,0 +1,119 @@
+import com.mongodb.client.*;
+import com.mongodb.client.model.Aggregates;
+import com.mongodb.client.model.Filters;
+import com.mongodb.client.model.Projections;
+import com.mongodb.client.model.Accumulators;
+import org.bson.Document;
+import org.bson.conversions.Bson;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.regex.Pattern;
+
+public class SearchFunction {
+
+    private MongoDatabase db;
+
+    public SearchFunction(MongoDatabase database) {
+        this.db = database;
+    }
+
+    public void search(String queryString) {
+        try {
+            Pattern regex = Pattern.compile(queryString, Pattern.CASE_INSENSITIVE); // Case-insensitive regex for partial matching
+
+            List<Document> results = new ArrayList<>();
+
+            // Search for users by name and return FullName with UserID
+            MongoCollection<Document> userCollection = db.getCollection("user");
+            FindIterable<Document> users = userCollection.find(Filters.regex("FullName", regex))
+                    .projection(Projections.include("UserID", "FullName"));
+            for (Document user : users) {
+                Document result = new Document("type", "user")
+                        .append("name", user.getString("FullName"))
+                        .append("UserID", user.getInteger("UserID"));
+                results.add(result);
+            }
+
+            // Search for pages by name and return PageName with PageID
+            MongoCollection<Document> pageCollection = db.getCollection("page");
+            FindIterable<Document> pages = pageCollection.find(Filters.regex("PageName", regex))
+                    .projection(Projections.include("PageID", "PageName"));
+            for (Document page : pages) {
+                Document result = new Document("type", "page")
+                        .append("name", page.getString("PageName"))
+                        .append("PageID", page.getInteger("PageID"));
+                results.add(result);
+            }
+
+            // Search for groups by name and return GroupName with GroupID
+            MongoCollection<Document> groupCollection = db.getCollection("group");
+            FindIterable<Document> groups = groupCollection.find(Filters.regex("GroupName", regex))
+                    .projection(Projections.include("GroupID", "GroupName"));
+            for (Document group : groups) {
+                Document result = new Document("type", "group")
+                        .append("name", group.getString("GroupName"))
+                        .append("GroupID", group.getInteger("GroupID"));
+                results.add(result);
+            }
+
+            // Search for posts by content and return Content with PostID and CategoryName
+            MongoCollection<Document> postCollection = db.getCollection("post");
+            List<Bson> pipeline = new ArrayList<>();
+            pipeline.add(Aggregates.match(Filters.regex("Content", regex)));
+            pipeline.add(Aggregates.lookup("category", "CategoryID", "CategoryID", "CategoryDetails"));
+            pipeline.add(Aggregates.project(Projections.fields(
+                    Projections.include("PostID", "Content"),
+                    Projections.computed("CategoryName", new Document("$arrayElemAt", List.of("$CategoryDetails.CategoryName", 0)))
+            )));
+            AggregateIterable<Document> postsByContent = postCollection.aggregate(pipeline);
+            for (Document post : postsByContent) {
+                Document result = new Document("type", "post")
+                        .append("content", post.getString("Content"))
+                        .append("PostID", post.getInteger("PostID"))
+                        .append("category", post.getString("CategoryName"));
+                results.add(result);
+            }
+
+            // Search for categories by name and return all posts with matching CategoryID
+            MongoCollection<Document> categoryCollection = db.getCollection("category");
+            FindIterable<Document> categories = categoryCollection.find(Filters.regex("CategoryName", regex))
+                    .projection(Projections.include("CategoryID", "CategoryName"));
+            for (Document category : categories) {
+                Integer categoryID = category.getInteger("CategoryID");
+                String categoryName = category.getString("CategoryName");
+                FindIterable<Document> postsByCategory = postCollection.find(Filters.eq("CategoryID", categoryID))
+                        .projection(Projections.include("PostID", "Content"));
+                for (Document post : postsByCategory) {
+                    Document result = new Document("type", "post")
+                            .append("content", post.getString("Content"))
+                            .append("PostID", post.getInteger("PostID"))
+                            .append("category", categoryName);
+                    results.add(result);
+                }
+            }
+
+            // Print results
+            for (Document result : results) {
+                System.out.println(result.toJson());
+            }
+
+        } catch (Exception e) {
+            System.err.println("Error searching: " + e.getMessage());
+        }
+    }
+
+    public static void main(String[] args) {
+        // Connect to MongoDB
+        MongoClient mongoClient = MongoClients.create("mongodb://localhost:27017");
+        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+
+        // Create an instance of the SearchFunction class
+        SearchFunction searchFunction = new SearchFunction(database);
+
+        // Perform a search
+        searchFunction.search("technology");
+
+        // Close the MongoDB connection
+        mongoClient.close();
+    }
+}
