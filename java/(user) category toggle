@@ -6,6 +6,8 @@ import com.mongodb.client.model.Filters;
 import com.mongodb.client.model.Updates;
 import org.bson.Document;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -17,8 +19,8 @@ public class CategoryService {
         this.db = database;
     }
 
-    // Add CategoryIDs to a user
-    public void selectCategories(int userID, List<Integer> categoryIDs) {
+    // Toggle CategoryIDs for a user
+    public void toggleCategories(int userID, List<Integer> categoryIDs) {
         try {
             // Check if the category IDs exist in the category collection
             MongoCollection<Document> categoryCollection = db.getCollection("category");
@@ -38,42 +40,43 @@ public class CategoryService {
                 return;
             }
 
-            // Add the valid category IDs to the user's PreferredCategories array
+            // Get the user's current PreferredCategories
             MongoCollection<Document> userCollection = db.getCollection("user");
-            Document result = userCollection.updateOne(
-                    Filters.eq("UserID", userID),
-                    Updates.addEachToSet("PreferredCategories", validCategoryIDs)
-            ).getModifiedCount();
-
-            if (result == 0) {
-                System.out.println("Error: Failed to add CategoryIDs.");
+            Document user = userCollection.find(Filters.eq("UserID", userID)).first();
+            if (user == null) {
+                System.out.println("Error: User not found.");
                 return;
             }
 
-            System.out.println("CategoryIDs added successfully to UserID: " + userID);
-        } catch (Exception e) {
-            System.out.println("Error adding CategoryIDs to user: " + e.getMessage());
-        }
-    }
+            List<Integer> currentCategories = user.getList("PreferredCategories", Integer.class, new ArrayList<>());
 
-    // Remove CategoryIDs from a user
-    public void deselectCategories(int userID, List<Integer> categoryIDs) {
-        try {
-            // Remove the category IDs from the user's PreferredCategories array
-            MongoCollection<Document> userCollection = db.getCollection("user");
-            Document result = userCollection.updateOne(
-                    Filters.eq("UserID", userID),
-                    Updates.pullAll("PreferredCategories", categoryIDs)
-            ).getModifiedCount();
+            // Separate validCategoryIDs into those to add and those to remove
+            List<Integer> toAdd = validCategoryIDs.stream()
+                    .filter(id -> !currentCategories.contains(id))
+                    .collect(Collectors.toList());
 
-            if (result == 0) {
-                System.out.println("Error: Failed to remove CategoryIDs.");
-                return;
+            List<Integer> toRemove = validCategoryIDs.stream()
+                    .filter(currentCategories::contains)
+                    .collect(Collectors.toList());
+
+            // Update the user's PreferredCategories
+            if (!toAdd.isEmpty()) {
+                userCollection.updateOne(
+                        Filters.eq("UserID", userID),
+                        Updates.addEachToSet("PreferredCategories", toAdd)
+                );
             }
 
-            System.out.println("CategoryIDs removed successfully from UserID: " + userID);
+            if (!toRemove.isEmpty()) {
+                userCollection.updateOne(
+                        Filters.eq("UserID", userID),
+                        Updates.pullAll("PreferredCategories", toRemove)
+                );
+            }
+
+            System.out.println("CategoryIDs toggled successfully for UserID: " + userID);
         } catch (Exception e) {
-            System.out.println("Error removing CategoryIDs from user: " + e.getMessage());
+            System.out.println("Error toggling CategoryIDs for user: " + e.getMessage());
         }
     }
 
@@ -86,7 +89,7 @@ public class CategoryService {
         CategoryService categoryService = new CategoryService(database);
 
         // Usage examples
-        categoryService.selectCategories(1, Arrays.asList(101, 102, 103)); // Add CategoryIDs 101, 102, 103 to UserID 1
-        categoryService.deselectCategories(1, Arrays.asList(101, 102)); // Remove CategoryIDs 101, 102 from UserID 1
+        categoryService.toggleCategories(1, Arrays.asList(101, 102, 103)); // Toggle CategoryIDs 101, 102, 103 for UserID 1
+        categoryService.toggleCategories(1, Arrays.asList(101, 102)); // Toggle CategoryIDs 101, 102 for UserID 1
     }
 }
