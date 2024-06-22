@@ -1,4 +1,3 @@
-// submit a report
 function submitReport(reporterUserID, reportedEntityID, entityType) {
     try {
         // Check if the reporter is reporting themselves
@@ -30,6 +29,16 @@ function submitReport(reporterUserID, reportedEntityID, entityType) {
             }
         }
 
+        // Check if the user has already reported this entity
+        const existingReport = db.report.findOne({
+            ReporterUserID: reporterUserID,
+            ReportedEntityID: reportedEntityID,
+            EntityType: entityType
+        });
+        if (existingReport) {
+            throw new Error("You have already reported this entity.");
+        }
+
         // Generate a new ReportID
         const highestReport = db.report.findOne({}, { ReportID: 1 }, { sort: { ReportID: -1 } });
         const newReportID = highestReport ? highestReport.ReportID + 1 : 1;
@@ -56,9 +65,8 @@ function submitReport(reporterUserID, reportedEntityID, entityType) {
     }
 }
 
-submitReport(1, 1, "User",); 
-submitReport(1, 1, "Page",); 
-submitReport(1, 1, "Post",); 
-submitReport(1, 1, "Group",); 
-
-
+// Usage examples
+submitReport(1, 2, "User"); 
+submitReport(1, 3, "Page"); 
+submitReport(1, 4, "Post"); 
+submitReport(1, 5, "Group"); 
