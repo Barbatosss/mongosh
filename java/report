@@ -1,71 +1,64 @@
-import com.mongodb.client.MongoCollection;
-import com.mongodb.client.MongoDatabase;
-import com.mongodb.client.model.Filters;
-import com.mongodb.client.model.Sorts;
-import org.bson.Document;
-import org.bson.types.ObjectId;
-
 import java.util.Date;
-
-import static com.mongodb.client.model.Filters.*;
-import static com.mongodb.client.model.Updates.set;
+import java.util.Optional;
 
 public class ReportService {
 
-    private final MongoDatabase db;
+    private final Database db;
 
-    public ReportService(MongoDatabase database) {
-        this.db = database;
+    public ReportService(Database db) {
+        this.db = db;
     }
 
     public void submitReport(int reporterUserID, int reportedEntityID, String entityType) {
         try {
             // Check if the reporter is reporting themselves
-            if (entityType.equals("User") && reporterUserID == reportedEntityID) {
+            if ("User".equals(entityType) && reporterUserID == reportedEntityID) {
                 throw new Exception("You cannot report yourself.");
             }
 
             // Check if the reporter is reporting their own page
-            if (entityType.equals("Page")) {
-                MongoCollection<Document> pageCollection = db.getCollection("page");
-                Document page = pageCollection.find(eq("PageID", reportedEntityID)).first();
-                if (page != null && page.getInteger("CreatorUserID") == reporterUserID) {
+            if ("Page".equals(entityType)) {
+                Optional<Page> pageOpt = db.page.findOne(reportedEntityID);
+                if (pageOpt.isPresent() && pageOpt.get().getCreatorUserID() == reporterUserID) {
                     throw new Exception("You cannot report a page you created.");
                 }
             }
 
             // Check if the reporter is reporting their own post
-            if (entityType.equals("Post")) {
-                MongoCollection<Document> postCollection = db.getCollection("post");
-                Document post = postCollection.find(eq("PostID", reportedEntityID)).first();
-                if (post != null && post.getInteger("AuthorID") == reporterUserID && post.getString("AuthorType").equals("User")) {
+            if ("Post".equals(entityType)) {
+                Optional<Post> postOpt = db.post.findOne(reportedEntityID);
+                if (postOpt.isPresent() && postOpt.get().getAuthorID() == reporterUserID && "User".equals(postOpt.get().getAuthorType())) {
                     throw new Exception("You cannot report a post you created.");
                 }
             }
 
             // Check if the reporter is reporting their own group
-            if (entityType.equals("Group")) {
-                MongoCollection<Document> groupCollection = db.getCollection("group");
-                Document group = groupCollection.find(eq("GroupID", reportedEntityID)).first();
-                if (group != null && group.getInteger("CreatorUserID") == reporterUserID) {
+            if ("Group".equals(entityType)) {
+                Optional<Group> groupOpt = db.group.findOne(reportedEntityID);
+                if (groupOpt.isPresent() && groupOpt.get().getCreatorUserID() == reporterUserID) {
                     throw new Exception("You cannot report a group you created.");
                 }
             }
 
+            // Check if the user has already reported this entity
+            Optional<Report> existingReport = db.report.findOne(reporterUserID, reportedEntityID, entityType);
+            if (existingReport.isPresent()) {
+                throw new Exception("You have already reported this entity.");
+            }
+
             // Generate a new ReportID
-            MongoCollection<Document> reportCollection = db.getCollection("report");
-            Document highestReport = reportCollection.find().sort(Sorts.descending("ReportID")).first();
-            int newReportID = (highestReport != null) ? highestReport.getInteger("ReportID") + 1 : 1;
+            Optional<Report> highestReportOpt = db.report.findHighestReport();
+            int newReportID = highestReportOpt.map(report -> report.getReportID() + 1).orElse(1);
 
             // Create the report object
-            Document report = new Document("ReportID", newReportID)
-                    .append("ReporterUserID", reporterUserID)
-                    .append("ReportedEntityID", reportedEntityID)
-                    .append("EntityType", entityType)
-                    .append("Timestamp", new Date());
+            Report report = new Report(newReportID, reporterUserID, reportedEntityID, entityType, new Date());
 
             // Insert the report into the database
-            reportCollection.insertOne(report);
+            boolean result = db.report.insertOne(report);
+
+            if (!result) {
+                throw new Exception("Failed to insert report.");
+            }
 
             System.out.println("Report submitted successfully with ReportID: " + newReportID);
         } catch (Exception e) {
@@ -74,17 +67,134 @@ public class ReportService {
     }
 
     public static void main(String[] args) {
-        // Create a MongoDB client and database instance
-        MongoClient mongoClient = new MongoClient(new MongoClientURI("mongodb://localhost:27017"));
-        MongoDatabase database = mongoClient.getDatabase("yourDatabaseName");
+        Database db = new Database(); // Assume this initializes your database
+        ReportService reportService = new ReportService(db);
 
-        // Create an instance of ReportService
-        ReportService reportService = new ReportService(database);
-
-        // Sample usage
-        reportService.submitReport(1, 1, "User");
-        reportService.submitReport(1, 1, "Page");
-        reportService.submitReport(1, 1, "Post");
-        reportService.submitReport(1, 1, "Group");
+        // Usage examples
+        reportService.submitReport(1, 2, "User"); // Reporting another user
+        reportService.submitReport(1, 3, "Page"); // Reporting another user's page
+        reportService.submitReport(1, 4, "Post"); // Reporting another user's post
+        reportService.submitReport(1, 5, "Group"); // Reporting another user's group
     }
+}
+
+// Placeholder classes and interfaces for the database and entities
+
+class Database {
+    public UserCollection user = new UserCollection();
+    public PageCollection page = new PageCollection();
+    public PostCollection post = new PostCollection();
+    public GroupCollection group = new GroupCollection();
+    public ReportCollection report = new ReportCollection();
+}
+
+class UserCollection {
+    public Optional<User> findOne(int userID) {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+}
+
+class PageCollection {
+    public Optional<Page> findOne(int pageID) {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+}
+
+class PostCollection {
+    public Optional<Post> findOne(int postID) {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+}
+
+class GroupCollection {
+    public Optional<Group> findOne(int groupID) {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+}
+
+class ReportCollection {
+    public Optional<Report> findOne(int reporterUserID, int reportedEntityID, String entityType) {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+
+    public Optional<Report> findHighestReport() {
+        // Implement database fetch logic
+        return Optional.empty();
+    }
+
+    public boolean insertOne(Report report) {
+        // Implement database insert logic
+        return true;
+    }
+}
+
+// Placeholder classes for the entities
+
+class User {
+    private int userID;
+    // Additional user fields
+}
+
+class Page {
+    private int pageID;
+    private int creatorUserID;
+
+    public int getCreatorUserID() {
+        return creatorUserID;
+    }
+
+    // Additional page fields
+}
+
+class Post {
+    private int postID;
+    private int authorID;
+    private String authorType;
+
+    public int getAuthorID() {
+        return authorID;
+    }
+
+    public String getAuthorType() {
+        return authorType;
+    }
+
+    // Additional post fields
+}
+
+class Group {
+    private int groupID;
+    private int creatorUserID;
+
+    public int getCreatorUserID() {
+        return creatorUserID;
+    }
+
+    // Additional group fields
+}
+
+class Report {
+    private int reportID;
+    private int reporterUserID;
+    private int reportedEntityID;
+    private String entityType;
+    private Date timestamp;
+
+    public Report(int reportID, int reporterUserID, int reportedEntityID, String entityType, Date timestamp) {
+        this.reportID = reportID;
+        this.reporterUserID = reporterUserID;
+        this.reportedEntityID = reportedEntityID;
+        this.entityType = entityType;
+        this.timestamp = timestamp;
+    }
+
+    public int getReportID() {
+        return reportID;
+    }
+
 }
